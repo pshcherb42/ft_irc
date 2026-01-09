@@ -3,6 +3,7 @@
 #define SERVER_HPP
 
 #include <string>
+#include <iostream>
 #include <vector>
 #include <map>
 #include <poll.h>

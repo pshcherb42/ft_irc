@@ -9,6 +9,7 @@
 #include <iostream>
 #include <sstream>
 #include <algorithm>
+#include <cctype>  // For std::toupper
 
 Server::Server(int port, const std::string& password) 
     : _port(port), _password(password), _serverSocket(-1) {
@@ -143,4 +144,225 @@ void Server::acceptNewClient() {
     _fds.push_back(clientPollFd);
     // print message
     std::cout << "New client connected: fd " << new_socket << std::endl;
+}
+
+void Server::removeClient(int fd) {
+    // find and remove from _fds vector
+    for (size_t i = 0; i < _fds.size(); i++) {
+        if (_fds[i].fd == fd) {
+            _fds.erase(_fds.begin() + i);
+            break;
+        }
+    }
+    // find and delete from _clients map(delete to free memory)
+    std::map<int, Client*>::iterator it = _clients.find(fd);
+    if (it != _clients.end()) {
+        delete it->second;
+        _clients.erase(it);
+    }
+    // close the file descriptor
+    close(fd);
+    // print message
+    std::cout << "Client disconnected: fd " << fd << std::endl;
+}
+
+void Server::handleClientData(int fd) {
+    // 1. Receive data into buffer
+    char buffer[1024];
+    std::memset(buffer, 0, sizeof(buffer));
+    
+    ssize_t bytesRead = recv(fd, buffer, sizeof(buffer) - 1, 0);
+
+    //std::cout << "DEBUG: recv() returned " << bytesRead << " bytes from fd " << fd << std::endl;
+    
+    // 2. Check if recv failed (disconnect/error)
+    if (bytesRead <= 0) {
+        if (bytesRead == 0) {
+            std::cout << "Client disconnected: fd " << fd << std::endl;
+        } else {
+            std::cerr << "Error reading from client: fd " << fd << std::endl;
+        }
+        removeClient(fd);
+        return;
+    }
+
+       // std::cout << "DEBUG: Received data: [" << buffer << "]" << std::endl;
+
+    
+    // 3. Append received data to client's buffer
+    Client* client = _clients[fd];
+    client->getBuffer().append(buffer, bytesRead);  // Append exactly what we received
+    
+    // 4. Extract complete commands (ending with \r\n)
+    std::string& clientBuffer = client->getBuffer();
+    //std::cout << "DEBUG: Client buffer now: [" << clientBuffer << "]" << std::endl;
+    size_t pos;
+    
+    while ((pos = clientBuffer.find("\n")) != std::string::npos) {
+        // Extract one complete command
+        std::string command = clientBuffer.substr(0, pos);
+        clientBuffer.erase(0, pos + 2);  // Remove command + \r\n
+
+        //std::cout << "DEBUG: Extracted command: [" << command << "]" << std::endl;
+        
+        // 5. Process this command
+        if (!command.empty()) {
+            processCommand(fd, command);
+        }
+    }
+    // Incomplete data stays in buffer for next recv()
+}
+
+// Send message to a client
+void Server::sendToClient(int fd, const std::string& message) {
+    std::string msg = message + "\r\n";
+    send(fd, msg.c_str(), msg.length(), 0);
+}
+
+// Split string by spaces
+std::vector<std::string> Server::split(const std::string& str) {
+    std::vector<std::string> result;
+    std::stringstream ss(str);
+    std::string word;
+    
+    while (ss >> word) {
+        result.push_back(word);
+    }
+    
+    return result;
+}
+
+void Server::processCommand(int fd, const std::string& command) {
+    std::cout << "Command from fd " << fd << ": " << command << std::endl;
+    
+    // 1. Split the command string by spaces
+    std::vector<std::string> params = split(command);
+    
+    if (params.empty()) {
+        return;  // Empty command, ignore
+    }
+    
+    // 2. Convert command name to uppercase
+    std::string cmd = params[0];
+    for (size_t i = 0; i < cmd.length(); i++) {
+        cmd[i] = std::toupper(cmd[i]);
+    }
+    
+    // 3. Call the appropriate handler
+    if (cmd == "PASS") {
+        cmdPass(fd, params);
+    }
+    else if (cmd == "NICK") {
+        cmdNick(fd, params);
+    }
+    else if (cmd == "USER") {
+        cmdUser(fd, params);
+    }
+    else {
+        // Unknown command
+        sendToClient(fd, ":server 421 * " + cmd + " :Unknown command");
+    }
+}
+
+void Server::cmdPass(int fd, const std::vector<std::string>& params) {
+    Client* client = _clients[fd];
+    
+    // Check if enough parameters
+    if (params.size() < 2) {
+        sendToClient(fd, ":server 461 * PASS :Not enough parameters");
+        return;
+    }
+    
+    // Check password
+    if (params[1] == _password) {
+        client->setAuthenticated(true);
+        std::cout << "Client fd " << fd << " authenticated" << std::endl;
+    } else {
+        sendToClient(fd, ":server 464 * :Password incorrect");
+        removeClient(fd);  // Wrong password = disconnect
+    }
+}
+
+void Server::cmdNick(int fd, const std::vector<std::string>& params) {
+    Client* client = _clients[fd];
+    
+    // 1. Check if client is authenticated
+    if (!client->isAuthenticated()) {
+        sendToClient(fd, ":server 451 * :You have not registered");
+        return;
+    }
+    
+    // 2. Check if enough parameters
+    if (params.size() < 2) {
+        sendToClient(fd, ":server 431 * :No nickname given");
+        return;
+    }
+    
+    std::string newNick = params[1];
+    
+    // 3. Check if nickname is already taken by another client
+    for (std::map<int, Client*>::iterator it = _clients.begin(); 
+         it != _clients.end(); ++it) {
+        if (it->first != fd && it->second->getNickname() == newNick) {
+            sendToClient(fd, ":server 433 * " + newNick + " :Nickname is already in use");
+            return;
+        }
+    }
+    
+    // 4. Set the nickname
+    client->setNickname(newNick);
+    std::cout << "Client fd " << fd << " set nickname: " << newNick << std::endl;
+    
+    // 5. If both nickname AND username are set, mark as registered
+    if (!client->getUsername().empty() && !client->isRegistered()) {
+        client->setRegistered(true);
+        sendToClient(fd, ":server 001 " + newNick + " :Welcome to the IRC Network");
+        std::cout << "Client fd " << fd << " is now fully registered" << std::endl;
+    }
+}
+
+void Server::cmdUser(int fd, const std::vector<std::string>& params) {
+    Client* client = _clients[fd];  // FIX: You forgot to initialize!
+    
+    // 1. Check if authenticated
+    if (!client->isAuthenticated()) {
+        sendToClient(fd, ":server 451 * :You have not registered");
+        return;
+    }
+    
+    // 2. Check if enough parameters (USER username hostname servername :realname)
+    if (params.size() < 5) {
+        sendToClient(fd, ":server 461 * USER :Not enough parameters");
+        return;
+    }
+    
+    // 3. Set username (params[1])
+    std::string username = params[1];
+    client->setUsername(username);
+    std::cout << "Client fd " << fd << " set username: " << username << std::endl;
+    
+    // 4. Set realname (params[4] onwards, removing leading ':')
+    std::string realname = params[4];
+    if (realname[0] == ':') {
+        realname = realname.substr(1);  // Remove the ':'
+    }
+    
+    // If there are more parameters, join them (realname can have spaces)
+    for (size_t i = 5; i < params.size(); i++) {
+        realname += " " + params[i];
+    }
+    
+    client->setRealname(realname);
+    std::cout << "Client fd " << fd << " set realname: " << realname << std::endl;
+    
+    // 5. If both nickname AND username are set, mark as registered
+    if (!client->getNickname().empty() && !client->isRegistered()) {
+        client->setRegistered(true);
+        std::string nick = client->getNickname();
+        sendToClient(fd, ":server 001 " + nick + " :Welcome to the IRC Network");
+        sendToClient(fd, ":server 002 " + nick + " :Your host is server");
+        sendToClient(fd, ":server 003 " + nick + " :This server was created today");
+        sendToClient(fd, ":server 004 " + nick + " server 1.0 o o");
+        std::cout << "Client fd " << fd << " is now fully registered" << std::endl;
+    }
 }
