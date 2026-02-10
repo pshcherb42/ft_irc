@@ -5,12 +5,13 @@ CFLAGS=-Wall -Wextra -Werror -std=c++98
 SRC=	main.cpp \
 		Server.cpp \
 		Client.cpp \
+		Channel.cpp
 
 OBJ=$(SRC:.cpp=.o)
 
 all: $(NAME)
 
-$(NAME): $(OBJ) Makefile Server.cpp Client.cpp 
+$(NAME): $(OBJ) Makefile Server.cpp Client.cpp  Channel.cpp
 	$(CC) $(CFLAGS) $(OBJ) -o $(NAME)
 
 %.o: %.cpp 

@@ -5,6 +5,7 @@
 #include <netinet/in.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <stdio.h>
 #include <cstring>
 #include <iostream>
 #include <sstream>
@@ -13,7 +14,7 @@
 
 Server::Server(int port, const std::string& password) 
     : _port(port), _password(password), _serverSocket(-1) {
-    setupSocket();
+    setupSocket(); // Настраиваем сокет при создании сервера
 }
 
 Server::~Server() {
@@ -33,7 +34,7 @@ int guard(int n, char * err) { if (n == -1) { perror(err); exit(1); } return n; 
 
 void Server::setupSocket() {
     //Create socket
-    _serverSocket = socket(AF_INET,SOCK_STREAM, 0);
+    _serverSocket = socket(AF_INET,SOCK_STREAM, 0); // TCP-сокет
     if (_serverSocket == -1) {
         throw std::runtime_error("Error creating socket");;
     }
@@ -42,7 +43,7 @@ void Server::setupSocket() {
         close(_serverSocket);
         throw std::runtime_error("Error setting non-blocking");
     }
-    //Set SO_REUSEADDR option
+    //Set SO_REUSEADDR option - Можно переподключать порт без ожидания
     int opt = 1;
     if (setsockopt(_serverSocket, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) == -1) {
         close(_serverSocket);
@@ -55,18 +56,19 @@ void Server::setupSocket() {
     serverAddr.sin_port = htons(_port);  // Use _port from constructor!
     serverAddr.sin_addr.s_addr = INADDR_ANY;  // No need for htonl with INADDR_ANY
 
+    // Привязка к порту
     if (bind(_serverSocket, (struct sockaddr*)&serverAddr, sizeof(serverAddr)) == -1) {
         close(_serverSocket);
         throw std::runtime_error("Error binding socket");
     }
 
-    //Listen
+    //Listen - Начало прослушивания
     if (listen(_serverSocket, 10) == -1) {
         close(_serverSocket);
         throw std::runtime_error("Error listening on socket");
     }
 
-    //Add server socket to _fds vector
+    //Add server socket to _fds vector -  Добавляем серверный сокет в poll
     struct pollfd serverPollFd;
     serverPollFd.fd = _serverSocket;
     serverPollFd.events = POLLIN;  // Watch for incoming connections
@@ -81,7 +83,7 @@ void Server::start() {
     std::cout << "IRC Server started. Waiting for connections..." << std::endl;
     
     while (true) {
-        // Call poll() - wait for events
+        // Call poll() - wait for events - Ждём события на любом сокете
         int pollCount = poll(&_fds[0], _fds.size(), -1);
         
         if (pollCount == -1) {
@@ -92,7 +94,7 @@ void Server::start() {
         for (size_t i = 0; i < _fds.size(); i++) {
             // Skip if no event
             if (_fds[i].revents == 0) {
-                continue;
+                continue;  // Нет событий
             }
             
             // Check for errors
@@ -115,18 +117,19 @@ void Server::start() {
     }
 }
 
-void Server::acceptNewClient() {
+void Server::acceptNewClient() //Создаёт новый объект Client для каждого подключения
+{
     // accept connection
     struct sockaddr_in address;
     socklen_t addrlen = sizeof(address);
     int new_socket = accept(_serverSocket, (struct sockaddr*)&address,
-                  &addrlen);
+                  &addrlen); // Принимаем нового клиента
 
     if (new_socket == -1) {
         std::cerr << "Error accepting client" << std::endl;
         return;  // Don't crash, just continue
     }
-    // set client socket to non blocking
+    // set client socket to non blocking 
     if(fcntl(new_socket, F_SETFL, O_NONBLOCK) == -1) {
         std::cerr << "Error setting client non-blocking" << std::endl;
         close(new_socket);
@@ -258,6 +261,12 @@ void Server::processCommand(int fd, const std::string& command) {
     else if (cmd == "USER") {
         cmdUser(fd, params);
     }
+    else if (cmd == "JOIN") {
+        cmdJoin(fd, params);
+    }
+    else if (cmd == "PRIVMSG") {
+        cmdPrivmsg(fd, params);
+    }    
     else {
         // Unknown command
         sendToClient(fd, ":server 421 * " + cmd + " :Unknown command");
@@ -366,3 +375,126 @@ void Server::cmdUser(int fd, const std::vector<std::string>& params) {
         std::cout << "Client fd " << fd << " is now fully registered" << std::endl;
     }
 }
+
+void Server::cmdJoin(int fd, const std::vector<std::string>& params) {
+    if (params.size() < 2) {
+        sendToClient(fd, ":server 461 * JOIN :Not enough parameters");
+        return;
+    }
+
+    if (_clients.find(fd) == _clients.end()) {
+        return;
+    }
+
+    Client* client = _clients[fd];
+
+    if (!client->isRegistered()) {
+        sendToClient(fd, ":server 451 * :You have not registered");
+        return;
+    }
+
+    std::string channelName = params[1];
+
+    if (channelName.empty() || channelName[0] != '#') {
+        sendToClient(fd,
+            ":server 403 " + channelName + " :No such channel");
+        return;
+    }
+
+    // найти или создать канал
+    std::map<std::string, Channel>::iterator it = _channels.find(channelName);
+    if (it == _channels.end()) {
+        _channels.insert(std::make_pair(channelName, Channel(channelName)));
+        it = _channels.find(channelName);
+    }
+
+    Channel& channel = it->second;
+
+    if (channel.hasClient(fd)) {
+        return;
+    }
+
+    channel.addClient(fd);
+
+    std::string joinMsg =
+        ":" + client->getNickname() + " JOIN " + channelName;
+
+    const std::set<int>& members = channel.getClients();
+    for (std::set<int>::const_iterator m = members.begin();
+         m != members.end(); ++m) {
+        sendToClient(*m, joinMsg);
+    }
+
+    std::cout << "Client fd " << fd
+              << " joined channel " << channelName << std::endl;
+}
+
+void Server::cmdPrivmsg(int fd, const std::vector<std::string>& params) {
+    // 1. Проверяем регистрацию клиента
+    if (_clients.find(fd) == _clients.end())
+        return;
+
+    Client* sender = _clients[fd];
+    if (!sender->isRegistered()) {
+        sendToClient(fd, ":server 451 * :You have not registered");
+        return;
+    }
+
+    // 2. Проверяем, что есть хотя бы 2 параметра: получатель и сообщение
+    if (params.size() < 3) {
+        sendToClient(fd, ":server 461 * PRIVMSG :Not enough parameters");
+        return;
+    }
+
+    std::string target = params[1]; // #channel или ник пользователя
+    std::string message;
+
+    // Собираем всё остальное как текст сообщения
+    message = params[2];
+    for (size_t i = 3; i < params.size(); i++) {
+        message += " " + params[i];
+    }
+
+    // Убираем ведущий ':', если есть
+    if (!message.empty() && message[0] == ':') {
+        message = message.substr(1);
+    }
+
+    // 3. Если target начинается с '#', это канал
+    if (target[0] == '#') {
+        std::map<std::string, Channel>::iterator it = _channels.find(target);
+        if (it == _channels.end()) {
+            sendToClient(fd, ":server 403 " + target + " :No such channel");
+            return;
+        }
+
+        Channel& channel = it->second;
+        if (!channel.hasClient(fd)) {
+            sendToClient(fd, ":server 442 " + target + " :You're not on that channel");
+            return;
+        }
+
+        // Отправляем ВСЕМ клиентам канала
+        std::string fullMsg = ":" + sender->getNickname() + " PRIVMSG " + target + " :" + message;
+        const std::set<int>& members = channel.getClients();
+        for (std::set<int>::const_iterator it2 = members.begin(); it2 != members.end(); ++it2) {
+            sendToClient(*it2, fullMsg);
+        }
+    } 
+    else {
+        // 4. Если target — ник пользователя
+        bool found = false;
+        for (std::map<int, Client*>::iterator it = _clients.begin(); it != _clients.end(); ++it) {
+            if (it->second->getNickname() == target) {
+                std::string fullMsg = ":" + sender->getNickname() + " PRIVMSG " + target + " :" + message;
+                sendToClient(it->first, fullMsg);
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            sendToClient(fd, ":server 401 " + target + " :No such nick");
+        }
+    }
+}
+

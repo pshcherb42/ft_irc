@@ -7,38 +7,44 @@
 #include <vector>
 #include <map>
 #include <poll.h>
+#include "Channel.hpp"
 
-class Client; // Forward declaration
+class Client; // Forward declaration — говорим, что класс Client существует, чтобы использовать указатели
 
 class Server {
 private:
-    int _port;
-    std::string _password;
-    int _serverSocket;
-    std::vector<struct pollfd> _fds;
-    std::map<int, Client*> _clients;
+    int _port; // Порт, на котором слушает сервер
+    std::string _password; // Пароль для подключения (PASS)
+    int _serverSocket; // Сокет сервера
+    std::vector<struct pollfd> _fds; // Вектор для poll() всех сокетов (сервер + клиенты)
+    std::map<int, Client*> _clients; // Словарь: fd -> объект Client
+    std::map<std::string, Channel> _channels;
+
 
 public:
     Server(int port, const std::string& password);
     ~Server();
     
-    void start();
+    void start(); //основной цикл сервера
     
 private:
-    void setupSocket();
-    void acceptNewClient();
-    void handleClientData(int fd);
-    void removeClient(int fd);
-    void processCommand(int fd, const std::string& command);
+    void setupSocket(); // Создание и настройка серверного сокета
+    void acceptNewClient(); // Принятие нового подключения
+    void handleClientData(int fd); // Чтение данных от клиента
+    void removeClient(int fd); // Удаление клиента (отключение)
+    void processCommand(int fd, const std::string& command); // Разбор и выполнение команды
     
     // Command handlers
     void cmdPass(int fd, const std::vector<std::string>& params);
     void cmdNick(int fd, const std::vector<std::string>& params);
     void cmdUser(int fd, const std::vector<std::string>& params);
+    void cmdJoin(int fd, const std::vector<std::string>& params);
+    void cmdPrivmsg(int fd, const std::vector<std::string>& params);
+
     
     // Utilities
-    void sendToClient(int fd, const std::string& message);
-    std::vector<std::string> split(const std::string& str);
+    void sendToClient(int fd, const std::string& message); // Отправка сообщения клиенту
+    std::vector<std::string> split(const std::string& str); // Разделение строки на слова по пробелу
 };
 
 #endif
