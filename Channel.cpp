@@ -55,6 +55,10 @@ void Channel::removeInvited(int fd) { _invited.erase(fd); }
 bool Channel::isTopicRestricted() const { return (_topicRestricted); }
 void Channel::setTopicRestricted(bool val) { _topicRestricted = val; }
 
+void Channel::setTopic(const std::string& topic) { _topic = topic; }// Устанавливает новую тему канала
+const std::string& Channel::getTopic() const { return (_topic); }// Возвращает текущую тему канала
+
+
 void Channel::setKey(const std::string& key) { _key = key; }
 const std::string& Channel::getKey() const { return (_key); }
 

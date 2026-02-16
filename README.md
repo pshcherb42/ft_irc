@@ -37,11 +37,12 @@ JOIN - create/join channels
 
 PRIVMSG -  Send messages to channels/user
 
-Operator Commands(PART, MODE, KICK, INVITE)
+Operator Commands(PART, MODE, KICK, INVITE, TOPIC)
 
 # possible next steps
 
-Operator Commands(TOPIC)
+проверить если неправильно ввел пароль при пасс то при повторном вводе выходит из программы
+после mode #channel smth выдает сообщение и делает доп пропуск строки
 
 Потом проерить что есть ридми файл для проверки
 Проверить что все классы сделаны по каноникал форм (если надо)
