@@ -11,7 +11,8 @@
 
 class Client; // Forward declaration — говорим, что класс Client существует, чтобы использовать указатели
 
-class Server {
+class Server 
+{
 private:
     int _port; // Порт, на котором слушает сервер
     std::string _password; // Пароль для подключения (PASS)
@@ -40,6 +41,10 @@ private:
     void cmdUser(int fd, const std::vector<std::string>& params);
     void cmdJoin(int fd, const std::vector<std::string>& params);
     void cmdPrivmsg(int fd, const std::vector<std::string>& params);
+    void cmdPart(int fd, const std::vector<std::string>& params);
+    void cmdMode(int fd, const std::vector<std::string>& params);
+    void cmdInvite(int fd, const std::vector<std::string>& params);
+    void cmdKick(int fd, const std::vector<std::string>& params);
 
     
     // Utilities

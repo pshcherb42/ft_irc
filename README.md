@@ -12,12 +12,16 @@ compile using make
 
  on client side write: PASS secret123
  then: NICK yournick
- then: USER 0 * :yourusername
+ then: USER 0 * : yourusername
 
  This should grant you access to the server and on a client side you will see something like :server 001 alice :Welcome to the IRC Network
 :server 002 alice :Your host is server
 :server 003 alice :This server was created today
 :server 004 alice server 1.0 o o
+
+After try JOIN #testchannel
+
+try PRIVMSG #testchannel :Hello, everyne!
 
 # what is done
 
@@ -29,10 +33,15 @@ Command parsing(handling "\n") -- should be "\r\n" -- but for testing only works
 
 Authentification (PASS,NICK,USER)
 
-# possible next steps
-
 JOIN - create/join channels
 
 PRIVMSG -  Send messages to channels/user
 
-Operator Commands(KICK, INVITE, TOPIC, MODE)
+Operator Commands(PART, MODE, KICK, INVITE)
+
+# possible next steps
+
+Operator Commands(TOPIC)
+
+Потом проерить что есть ридми файл для проверки
+Проверить что все классы сделаны по каноникал форм (если надо)
