@@ -209,7 +209,7 @@ void Server::handleClientData(int fd)
     //std::cout << "DEBUG: Client buffer now: [" << clientBuffer << "]" << std::endl;
     size_t pos;
     
-    while ((pos = clientBuffer.find("\n")) != std::string::npos) {
+    while ((pos = clientBuffer.find("\r\n")) != std::string::npos) {
         // Extract one complete command
         std::string command = clientBuffer.substr(0, pos);
         clientBuffer.erase(0, pos + 2);  // Remove command + \r\n

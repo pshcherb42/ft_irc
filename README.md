@@ -23,6 +23,12 @@ After try JOIN #testchannel
 
 try PRIVMSG #testchannel :Hello, everyne!
 
+*with irssi - put in terminal irssi
+then /connect 127.0.0.1 6667 secret123
+
+to kill:  lsof -i 6667
+kill nomer
+
 # what is done
 
 Socket setup with non-blocking I/O
