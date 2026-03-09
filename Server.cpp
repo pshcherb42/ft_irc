@@ -398,9 +398,13 @@ void Server::cmdUser(int fd, const std::vector<std::string>& params)
     }
 }
 
-void Server::cmdJoin(int fd, const std::vector<std::string>& params) 
+void Server::cmdJoin(int fd, const std::vector<std::string>& params)
 {
-    if (params.size() < 2) 
+    std::cout << "JOIN params size = " << params.size() << std::endl;
+    for (size_t i = 0; i < params.size(); ++i)
+        std::cout << "params[" << i << "] = [" << params[i] << "]" << std::endl;
+
+    if (params.size() < 2)
     {
         sendToClient(fd, ":server 461 * JOIN :Not enough parameters");
         return;
@@ -411,7 +415,7 @@ void Server::cmdJoin(int fd, const std::vector<std::string>& params)
 
     Client* client = _clients[fd];
 
-    if (!client->isRegistered()) 
+    if (!client->isRegistered())
     {
         sendToClient(fd, ":server 451 * :You have not registered");
         return;
@@ -419,16 +423,42 @@ void Server::cmdJoin(int fd, const std::vector<std::string>& params)
 
     std::string channelName = params[1];
 
-    if (channelName.empty() || channelName[0] != '#') 
+    if (channelName.empty() || channelName[0] != '#')
     {
-        sendToClient(fd,
-            ":server 403 " + channelName + " :No such channel");
+        sendToClient(fd, ":server 403 " + client->getNickname() + " " + channelName + " :No such channel");
         return;
     }
 
-    // найти или создать канал
     std::map<std::string, Channel>::iterator it = _channels.find(channelName);
-    if (it == _channels.end()) 
+    bool channelExists = (it != _channels.end());
+
+    // Check key BEFORE creating anything
+    if (channelExists && !it->second.getKey().empty())
+    {
+        std::string givenKey = (params.size() >= 3) ? params[2] : "";
+        if (givenKey != it->second.getKey())
+        {
+            sendToClient(fd, ":server 475 " + client->getNickname() + " " + channelName + " :Cannot join channel (+k) key requested");
+            return;
+        }
+    }
+
+    // Check limit BEFORE creating anything
+    if (channelExists && it->second.getLimit() > 0 && it->second.getClients().size() >= it->second.getLimit())
+    {
+        sendToClient(fd, ":server 471 " + client->getNickname() + " " + channelName + " :Cannot join channel (+l) reached the limit");
+        return;
+    }
+
+    // Check invite-only BEFORE creating anything
+    if (channelExists && it->second.isInviteOnly() && !it->second.isInvited(fd))
+    {
+        sendToClient(fd, ":server 473 " + client->getNickname() + " " + channelName + " :Cannot join channel (+i) only invited people");
+        return;
+    }
+
+    // Only NOW create if it doesn't exist
+    if (!channelExists)
     {
         _channels.insert(std::make_pair(channelName, Channel(channelName)));
         it = _channels.find(channelName);
@@ -436,57 +466,45 @@ void Server::cmdJoin(int fd, const std::vector<std::string>& params)
 
     Channel& channel = it->second;
 
-    // Проверка ключа канала (+k)
-    if (!channel.getKey().empty()) 
-    {
-    std::string givenKey = "";
-        if (params.size() >= 3) // ключ может передаваться как 3-й параметр
-        givenKey = params[2];
-        if (givenKey != channel.getKey()) 
-        {
-        sendToClient(fd, ":server 475 " + channelName + " :Cannot join channel (+k) key requested");
-        return; // клиент не добавляется
-        }
-    }
-
-    // Проверка лимита участников (+l)
-    if (channel.getLimit() > 0 && channel.getClients().size() >= channel.getLimit()) 
-    {
-        sendToClient(fd, ":server 471 " + channelName + " :Cannot join channel (+l) reached the limit");
-        return; // клиент не добавляется
-    }
-
-    if (channel.hasClient(fd)) // Проверка: если клиент уже в канале — ничего не делаем
+    // Client already in channel — nothing to do
+    if (channel.hasClient(fd))
         return;
-
-    // Проверка invite-only (+i)
-    if (channel.isInviteOnly() && !channel.isInvited(fd))
-    {
-        sendToClient(fd, ":server 473 " + channelName + " :Cannot join channel (+i) only invited people");
-        return;
-    }
 
     channel.addClient(fd);
     channel.removeInvited(fd);
 
-    std::string joinMsg =
-        ":" + client->getNickname() + " JOIN " + channelName;
+    // If first member, make them operator
+    if (channel.getClients().size() == 1)
+        channel.addOperator(fd);
 
-    // Отправляем текущую тему новому участнику
-    if (!channel.getTopic().empty()) 
-    {
-        sendToClient(fd, ":server 332 " + client->getNickname() +
-                          " " + channelName + " :" + channel.getTopic());
-    }
+    std::string joinMsg = client->getPrefix() + " JOIN " + channelName;
 
+    // Broadcast JOIN to all members (including the new one)
     const std::set<int>& members = channel.getClients();
-    for (std::set<int>::const_iterator m = members.begin();
-         m != members.end(); ++m) {
+    for (std::set<int>::const_iterator m = members.begin(); m != members.end(); ++m)
         sendToClient(*m, joinMsg);
-    }
 
-    std::cout << "Client fd " << fd
-              << " joined channel " << channelName << std::endl;
+    // Send topic to new client if set
+    if (!channel.getTopic().empty())
+        sendToClient(fd, ":server 332 " + client->getNickname() + " " + channelName + " :" + channel.getTopic());
+    else
+        sendToClient(fd, ":server 331 " + client->getNickname() + " " + channelName + " :No topic is set");
+
+    // Send NAMES list (353) to new client
+    std::string namesList = "";
+    for (std::set<int>::const_iterator m = members.begin(); m != members.end(); ++m)
+    {
+        if (_clients.find(*m) != _clients.end())
+        {
+            if (!namesList.empty()) namesList += " ";
+            if (channel.isOperator(*m)) namesList += "@";
+            namesList += _clients[*m]->getNickname();
+        }
+    }
+    sendToClient(fd, ":server 353 " + client->getNickname() + " = " + channelName + " :" + namesList);
+    sendToClient(fd, ":server 366 " + client->getNickname() + " " + channelName + " :End of /NAMES list");
+
+    std::cout << "Client fd " << fd << " joined channel " << channelName << std::endl;
 }
 
 void Server::cmdPrivmsg(int fd, const std::vector<std::string>& params) 
@@ -552,7 +570,7 @@ void Server::cmdPrivmsg(int fd, const std::vector<std::string>& params)
         {
             if (it->second->getNickname() == target) 
             {
-                std::string fullMsg = ":" + sender->getNickname() + " PRIVMSG " + target + " :" + message;
+                std::string fullMsg = ":" + sender->getPrefix() + " PRIVMSG " + target + " :" + message;
                 sendToClient(it->first, fullMsg);
                 found = true;
                 break;
@@ -565,12 +583,11 @@ void Server::cmdPrivmsg(int fd, const std::vector<std::string>& params)
 
 void Server::cmdPart(int fd, const std::vector<std::string>& params) 
 {
-    if (params.size() < 2) 
+    if (params.size() < 2)
     {
         sendToClient(fd, ":server 461 PART :Not enough parameters\r\n");
         return;
     }
-
     std::string channelName = params[1];
 
     // канал существует?
@@ -593,7 +610,7 @@ void Server::cmdPart(int fd, const std::vector<std::string>& params)
     Client& client = *(_clients[fd]);
 
     // формируем сообщение
-    std::string partMsg = ":" + client.getNickname() + " PART " + channelName + "\r\n";
+    std::string partMsg = client.getPrefix() + " PART " + channelName + "\r\n";
 
     // рассылаем всем участникам канала
     const std::set<int>& members = channel.getClients();
@@ -610,19 +627,26 @@ void Server::cmdPart(int fd, const std::vector<std::string>& params)
         _channels.erase(channelName);
 }
 
-void Server::cmdMode(int fd, const std::vector<std::string>& params) 
+void Server::cmdMode(int fd, const std::vector<std::string>& params)
 {
-    if (params.size() < 3) 
+    // MODE без target вообще нельзя
+    if (params.size() < 2)
     {
         sendToClient(fd, ":server 461 MODE :Not enough parameters\r\n");
         return;
     }
 
     std::string channelName = params[1];
-    std::string modeChanges = params[2];
+
+    // В вашем проекте пока работаем только с channel modes
+    if (channelName.empty() || channelName[0] != '#')
+    {
+        sendToClient(fd, ":server 403 " + channelName + " :No such channel\r\n");
+        return;
+    }
 
     std::map<std::string, Channel>::iterator it = _channels.find(channelName);
-    if (it == _channels.end()) 
+    if (it == _channels.end())
     {
         sendToClient(fd, ":server 403 " + channelName + " :No such channel\r\n");
         return;
@@ -630,74 +654,193 @@ void Server::cmdMode(int fd, const std::vector<std::string>& params)
 
     Channel& channel = it->second;
 
-    Client& sender = *(_clients[fd]);
+    std::map<int, Client*>::iterator clientIt = _clients.find(fd);
+    if (clientIt == _clients.end() || clientIt->second == NULL)
+        return;
 
-    // Проверка: только оператор может менять режимы
-    if (!channel.isOperator(fd)) 
+    Client& sender = *(clientIt->second);
+
+    // -------------------------------------------------
+    // 1. Если пришло только MODE #channel
+    //    => это запрос текущих mode канала
+    // -------------------------------------------------
+    if (params.size() == 2)
+    {
+        std::string currentModes = "+";
+
+        if (channel.isInviteOnly())
+            currentModes += "i";
+        if (channel.isTopicRestricted())
+            currentModes += "t";
+        if (!channel.getKey().empty())
+            currentModes += "k";
+        if (channel.getLimit() > 0)
+            currentModes += "l";
+
+        std::string modeReply = ":server 324 " + sender.getNickname() + " " +
+                                channelName + " " + currentModes;
+
+        if (!channel.getKey().empty())
+            modeReply += " " + channel.getKey();
+        if (channel.getLimit() > 0)
+        {
+            std::stringstream ss;
+            ss << channel.getLimit();
+            modeReply += " " + ss.str();
+        }
+
+        modeReply += "\r\n";
+        sendToClient(fd, modeReply);
+        return;
+    }
+
+    // -------------------------------------------------
+    // 2. Начиная с этого места MODE меняет режимы
+    // -------------------------------------------------
+    if (!channel.isOperator(fd))
     {
         sendToClient(fd, ":server 482 " + channelName + " :You're not a channel operator\r\n");
         return;
     }
 
-    // Пробегаем по символам modes: +i, -i, +t, -t, +k, -k, +o, -o, +l, -l
+    std::string modeChanges = params[2];
     bool adding = true;
-    size_t paramIndex = 3; // параметры после modes
+    size_t paramIndex = 3;
 
-    for (size_t i = 0; i < modeChanges.size(); i++) {
+    std::string appliedModes = "";
+    std::vector<std::string> appliedParams;
+
+    for (size_t i = 0; i < modeChanges.size(); ++i)
+    {
         char c = modeChanges[i];
-        if (c == '+') adding = true;
-        else if (c == '-') adding = false;
-        else 
+
+        if (c == '+')
         {
-            switch(c) 
+            adding = true;
+            appliedModes += c;
+        }
+        else if (c == '-')
+        {
+            adding = false;
+            appliedModes += c;
+        }
+        else
+        {
+            switch (c)
             {
-                case 'i': channel.setInviteOnly(adding); break;
-                case 't': channel.setTopicRestricted(adding); break;
-                case 'k': 
-                    if (adding && paramIndex < params.size()) channel.setKey(params[paramIndex++]);
-                    else if (!adding) channel.setKey(""); 
+                case 'i':
+                    channel.setInviteOnly(adding);
+                    appliedModes += 'i';
                     break;
-                case 'l':
-                    if (adding && paramIndex < params.size()) {
-                        std::stringstream ss(params[paramIndex++]);
-                        unsigned int limit = 0;
-                        ss >> limit;
-                        channel.setLimit(limit);
-                    } else if (!adding) {
-                        channel.setLimit(0);
+
+                case 't':
+                    channel.setTopicRestricted(adding);
+                    appliedModes += 't';
+                    break;
+
+                case 'k':
+                    if (adding)
+                    {
+                        if (paramIndex >= params.size())
+                        {
+                            sendToClient(fd, ":server 461 MODE :Not enough parameters\r\n");
+                            return;
+                        }
+                        channel.setKey(params[paramIndex]);
+                        appliedModes += 'k';
+                        appliedParams.push_back(params[paramIndex]);
+                        paramIndex++;
+                    }
+                    else
+                    {
+                        channel.setKey("");
+                        appliedModes += 'k';
                     }
                     break;
-                case 'o': // добавляем или убираем оператора
-                    if (paramIndex >= params.size()) break; // нет никнейма
+
+                case 'l':
+                    if (adding)
                     {
-                        std::string nick = params[paramIndex++];
-                        int targetFd = -1;
-                        // ищем клиента по никнейму
-                        for (std::map<int, Client*>::iterator it = _clients.begin(); it != _clients.end(); ++it) 
+                        if (paramIndex >= params.size())
                         {
-                            if (it->second->getNickname() == nick) 
+                            sendToClient(fd, ":server 461 MODE :Not enough parameters\r\n");
+                            return;
+                        }
+
+                        std::stringstream ss(params[paramIndex]);
+                        unsigned int limit = 0;
+                        ss >> limit;
+
+                        channel.setLimit(limit);
+                        appliedModes += 'l';
+                        appliedParams.push_back(params[paramIndex]);
+                        paramIndex++;
+                    }
+                    else
+                    {
+                        channel.setLimit(0);
+                        appliedModes += 'l';
+                    }
+                    break;
+
+                case 'o':
+                    if (paramIndex >= params.size())
+                    {
+                        sendToClient(fd, ":server 461 MODE :Not enough parameters\r\n");
+                        return;
+                    }
+
+                    {
+                        std::string nick = params[paramIndex];
+                        int targetFd = -1;
+
+                        for (std::map<int, Client*>::iterator itClient = _clients.begin();
+                             itClient != _clients.end(); ++itClient)
+                        {
+                            if (itClient->second && itClient->second->getNickname() == nick)
                             {
-                                targetFd = it->first;
+                                targetFd = itClient->first;
                                 break;
                             }
                         }
-                        if (targetFd == -1) break; // клиент не найден
+
+                        if (targetFd == -1 || !channel.hasClient(targetFd))
+                        {
+                            sendToClient(fd, ":server 441 " + nick + " " + channelName + " :They aren't on that channel\r\n");
+                            return;
+                        }
+
                         if (adding)
                             channel.addOperator(targetFd);
                         else
                             channel.removeOperator(targetFd);
+
+                        appliedModes += 'o';
+                        appliedParams.push_back(nick);
+                        paramIndex++;
                     }
                     break;
-                default: break;
+
+                default:
+                    sendToClient(fd, ":server 472 " + std::string(1, c) + " :is unknown mode char to me\r\n");
+                    return;
             }
         }
     }
 
-    // Отправляем всем сообщение о смене режима
-    std::string modeMsg = ":" + sender.getNickname() + " MODE " + channelName + " " + modeChanges;
-    for (std::set<int>::const_iterator it2 = channel.getClients().begin(); it2 != channel.getClients().end(); ++it2) {
-        sendToClient(*it2, modeMsg + "\r\n");
-    }
+    if (appliedModes.empty() || appliedModes == "+" || appliedModes == "-")
+        return;
+
+    std::string modeMsg = sender.getPrefix() + " MODE " + channelName + " " + appliedModes;
+
+    for (size_t i = 0; i < appliedParams.size(); ++i)
+        modeMsg += " " + appliedParams[i];
+
+    modeMsg += "\r\n";
+
+    const std::set<int>& members = channel.getClients();
+    for (std::set<int>::const_iterator it2 = members.begin(); it2 != members.end(); ++it2)
+        sendToClient(*it2, modeMsg);
 }
 
 void Server::cmdInvite(int fd, const std::vector<std::string>& params)

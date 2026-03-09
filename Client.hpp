@@ -10,6 +10,7 @@ private:
     std::string _nickname;    //данные аутентификации
     std::string _username;    
     std::string _realname;
+
     std::string _buffer;      // Accumulates partial data(буфер, куда накапливаются частичные данные из recv() (для non-blocking I/O))
     bool _authenticated;      // PASS received and correct?
     bool _registered;         // NICK + USER both received?
@@ -23,6 +24,7 @@ public:
     std::string getNickname() const ;
     std::string getUsername() const ;
     std::string& getBuffer() ; // возвращаем ссылку, чтобы можно было изменять
+    std::string getPrefix() const;
     bool isAuthenticated() const ;
     bool isRegistered() const ;
     

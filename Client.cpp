@@ -15,6 +15,13 @@ Client::~Client() {
     std::string Client::getNickname() const { return _nickname; }
     std::string Client::getUsername() const { return _username; }
     std::string& Client::getBuffer() { return _buffer; } // возвращаем ссылку
+    std::string Client::getPrefix() const
+    {
+        std::string user = _username.empty() ? "user" : _username;
+        std::string host = "localhost";
+    
+        return ":" + _nickname + "!" + user + "@" + host;
+    }
     bool Client::isAuthenticated() const { return _authenticated; }
     bool Client::isRegistered() const { return _registered; }
     
