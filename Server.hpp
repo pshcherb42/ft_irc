@@ -20,7 +20,9 @@ private:
     std::vector<struct pollfd> _fds; // Вектор для poll() всех сокетов (сервер + клиенты)
     std::map<int, Client*> _clients; // Словарь: fd -> объект Client
     std::map<std::string, Channel> _channels;
-
+    //copy
+    //def
+    //=
 
 public:
     Server(int port, const std::string& password);
