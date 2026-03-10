@@ -58,3 +58,12 @@ Operator Commands(PART, MODE, KICK, INVITE, TOPIC)
 
 Потом проерить что есть ридми файл для проверки
 Проверить что все классы сделаны по каноникал форм (если надо)
+
+# errors
+
+For the *"No such channel" message* — that's irssi trying to auto-join its saved channels. It's not your server printing that, it's irssi's UI showing the 403 error your server correctly returns. You can ignore this entirely.
+
+# changes 10 march
+
+change get fcntl a set fcntl inside setupSocket in server.cpp
+adde ping pong and cap and quit, who inside proccessComand in server.cpp

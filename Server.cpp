@@ -41,7 +41,7 @@ void Server::setupSocket()
         throw std::runtime_error("Error creating socket");;
     }
     //Set to non-blocking
-    if(fcntl(_serverSocket, F_GETFL, O_NONBLOCK) == -1) {
+    if(fcntl(_serverSocket, F_SETFL, O_NONBLOCK) == -1) {
         close(_serverSocket);
         throw std::runtime_error("Error setting non-blocking");
     }
@@ -181,11 +181,8 @@ void Server::handleClientData(int fd)
     // 1. Receive data into buffer
     char buffer[1024];
     std::memset(buffer, 0, sizeof(buffer));
-    
     ssize_t bytesRead = recv(fd, buffer, sizeof(buffer) - 1, 0);
 
-    //std::cout << "DEBUG: recv() returned " << bytesRead << " bytes from fd " << fd << std::endl;
-    
     // 2. Check if recv failed (disconnect/error)
     if (bytesRead <= 0)
     {
@@ -196,25 +193,18 @@ void Server::handleClientData(int fd)
         removeClient(fd);
         return;
     }
-
-       // std::cout << "DEBUG: Received data: [" << buffer << "]" << std::endl;
-
-    
     // 3. Append received data to client's buffer
     Client* client = _clients[fd];
     client->getBuffer().append(buffer, bytesRead);  // Append exactly what we received
     
     // 4. Extract complete commands (ending with \r\n)
     std::string& clientBuffer = client->getBuffer();
-    //std::cout << "DEBUG: Client buffer now: [" << clientBuffer << "]" << std::endl;
     size_t pos;
     
     while ((pos = clientBuffer.find("\r\n")) != std::string::npos) {
         // Extract one complete command
         std::string command = clientBuffer.substr(0, pos);
         clientBuffer.erase(0, pos + 2);  // Remove command + \r\n
-
-        //std::cout << "DEBUG: Extracted command: [" << command << "]" << std::endl;
         
         // 5. Process this command
         if (!command.empty())
@@ -256,7 +246,22 @@ void Server::processCommand(int fd, const std::string& command)
     std::string cmd = params[0];
     for (size_t i = 0; i < cmd.length(); i++)
         cmd[i] = std::toupper(cmd[i]);
+    // In your dispatcher, before the "not registered" check:
+    if (cmd == "CAP")
+        return; // silently ignore
     
+    if (cmd == "PING") {
+        std::string token = params.size() > 1 ? params[1] : "ping";
+        sendToClient(fd, ":server PONG server :" + token);
+        return;
+    }
+
+    if (cmd == "QUIT"){
+        removeClient(fd);
+        return;
+    }
+    if (cmd == "WHO")
+        return;
     // 3. Call the appropriate handler
     if (cmd == "PASS")
         cmdPass(fd, params);
