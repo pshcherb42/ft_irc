@@ -48,6 +48,7 @@ private:
     void cmdInvite(int fd, const std::vector<std::string>& params);
     void cmdKick(int fd, const std::vector<std::string>& params);
     void cmdTopic(int fd, const std::vector<std::string>& params);
+    void cmdNotice(int fd, const std::vector<std::string>&params);
     
     // Utilities
     void sendToClient(int fd, const std::string& message); // Отправка сообщения клиенту

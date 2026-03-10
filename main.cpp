@@ -13,10 +13,12 @@ int main(int argc, char* argv[])
     int port = std::atoi(argv[1]);
     std::string password = argv[2];
     
-    try {
+    try 
+    {
         Server server(port, password);
         server.start();
-    } catch (std::exception& e) {
+    } catch (std::exception& e) 
+    {
         std::cerr << "Error: " << e.what() << std::endl;
         return (1);
     }

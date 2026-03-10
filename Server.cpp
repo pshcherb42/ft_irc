@@ -200,16 +200,21 @@ void Server::handleClientData(int fd)
     // 4. Extract complete commands (ending with \r\n)
     std::string& clientBuffer = client->getBuffer();
     size_t pos;
-    
-    while ((pos = clientBuffer.find("\r\n")) != std::string::npos) {
-        // Extract one complete command
+
+    while ((pos = clientBuffer.find('\n')) != std::string::npos)
+    {
         std::string command = clientBuffer.substr(0, pos);
-        clientBuffer.erase(0, pos + 2);  // Remove command + \r\n
-        
-        // 5. Process this command
+
+    // удаляем \r если это был CRLF
+        if (!command.empty() && command[command.size() - 1] == '\r')
+            command.erase(command.size() - 1);
+
+        clientBuffer.erase(0, pos + 1);
+
         if (!command.empty())
             processCommand(fd, command);
     }
+    
     // Incomplete data stays in buffer for next recv()
 }
 
@@ -286,6 +291,8 @@ void Server::processCommand(int fd, const std::string& command)
         cmdKick(fd, params);
     else if (cmd == "TOPIC")
         cmdTopic(fd, params);
+    else if (cmd == "NOTICE")
+        cmdNotice(fd, params);
     else {
         // Unknown command
         sendToClient(fd, ":server 421 * " + cmd + " :Unknown command");
@@ -395,48 +402,6 @@ void Server::cmdNick(int fd, const std::vector<std::string>& params)
     }
 }
 
-/*void Server::cmdNick(int fd, const std::vector<std::string>& params) 
-{
-    Client* client = _clients[fd];
-    
-    // 1. Check if client is authenticated
-    if (!client->isAuthenticated()) 
-    {
-        sendToClient(fd, ":server 451 * :You have not registered");
-        return;
-    }
-    
-    // 2. Check if enough parameters
-    if (params.size() < 2) 
-    {
-        sendToClient(fd, ":server 431 * :No nickname given");
-        return;
-    }
-    
-    std::string newNick = params[1];
-    
-    // 3. Check if nickname is already taken by another client
-    for (std::map<int, Client*>::iterator it = _clients.begin(); 
-         it != _clients.end(); ++it) {
-        if (it->first != fd && it->second->getNickname() == newNick) {
-            sendToClient(fd, ":server 433 * " + newNick + " :Nickname is already in use");
-            return;
-        }
-    }
-    
-    // 4. Set the nickname
-    client->setNickname(newNick);
-    std::cout << "Client fd " << fd << " set nickname: " << newNick << std::endl;
-    
-    // 5. If both nickname AND username are set, mark as registered
-    if (!client->getUsername().empty() && !client->isRegistered()) 
-    {
-        client->setRegistered(true);
-        sendToClient(fd, ":server 001 " + newNick + " :Welcome to the IRC Network");
-        std::cout << "Client fd " << fd << " is now fully registered" << std::endl;
-    }
-}*/
-
 void Server::cmdUser(int fd, const std::vector<std::string>& params) 
 {
     Client* client = _clients[fd];  // FIX: You forgot to initialize!
@@ -487,10 +452,6 @@ void Server::cmdUser(int fd, const std::vector<std::string>& params)
 
 void Server::cmdJoin(int fd, const std::vector<std::string>& params)
 {
-    std::cout << "JOIN params size = " << params.size() << std::endl;
-    for (size_t i = 0; i < params.size(); ++i)
-        std::cout << "params[" << i << "] = [" << params[i] << "]" << std::endl;
-
     if (params.size() < 2)
     {
         sendToClient(fd, ":server 461 * JOIN :Not enough parameters");
@@ -606,14 +567,14 @@ void Server::cmdPrivmsg(int fd, const std::vector<std::string>& params)
     // 2. Проверяем регистрацию
     if (!sender->isRegistered())
     {
-        sendToClient(fd, ":server 451 * :You have not registered\r\n");
+        sendToClient(fd, ":server 451 * :You have not registered");
         return;
     }
 
     // 3. Проверяем параметры
     if (params.size() < 3)
     {
-        sendToClient(fd, ":server 461 * PRIVMSG :Not enough parameters\r\n");
+        sendToClient(fd, ":server 461 * PRIVMSG :Not enough parameters");
         return;
     }
 
@@ -629,7 +590,7 @@ void Server::cmdPrivmsg(int fd, const std::vector<std::string>& params)
     // Пустое сообщение не отправляем
     if (message.empty())
     {
-        sendToClient(fd, ":server 412 :No text to send\r\n");
+        sendToClient(fd, ":server 412 :No text to send");
         return;
     }
 
@@ -639,7 +600,7 @@ void Server::cmdPrivmsg(int fd, const std::vector<std::string>& params)
         std::map<std::string, Channel>::iterator chIt = _channels.find(target);
         if (chIt == _channels.end())
         {
-            sendToClient(fd, ":server 403 " + target + " :No such channel\r\n");
+            sendToClient(fd, ":server 403 " + target + " :No such channel");
             return;
         }
 
@@ -647,11 +608,11 @@ void Server::cmdPrivmsg(int fd, const std::vector<std::string>& params)
 
         if (!channel.hasClient(fd))
         {
-            sendToClient(fd, ":server 442 " + target + " :You're not on that channel\r\n");
+            sendToClient(fd, ":server 442 " + target + " :You're not on that channel");
             return;
         }
 
-        std::string fullMsg = sender->getPrefix() + " PRIVMSG " + target + " :" + message + "\r\n";
+        std::string fullMsg = sender->getPrefix() + " PRIVMSG " + target + " :" + message;
 
         const std::set<int>& members = channel.getClients();
         for (std::set<int>::const_iterator it = members.begin(); it != members.end(); ++it)
@@ -665,84 +626,11 @@ void Server::cmdPrivmsg(int fd, const std::vector<std::string>& params)
         // 5. Личное сообщение пользователю
         bool found = false;
 
+        std::cout << "PRIVMSG target = [" << target << "]" << std::endl;
+
         for (std::map<int, Client*>::iterator it = _clients.begin(); it != _clients.end(); ++it)
         {
             if (it->second && it->second->getNickname() == target)
-            {
-                std::string fullMsg = sender->getPrefix() + " PRIVMSG " + target + " :" + message + "\r\n";
-                sendToClient(it->first, fullMsg);
-                found = true;
-                break;
-            }
-        }
-
-        if (!found)
-            sendToClient(fd, ":server 401 " + target + " :No such nick\r\n");
-    }
-}
-
-/*void Server::cmdPrivmsg(int fd, const std::vector<std::string>& params) 
-{
-    // 1. Проверяем регистрацию клиента
-    if (_clients.find(fd) == _clients.end())
-        return;
-
-    Client* sender = _clients[fd];
-    if (!sender->isRegistered()) 
-    {
-        sendToClient(fd, ":server 451 * :You have not registered");
-        return;
-    }
-
-    // 2. Проверяем, что есть хотя бы 2 параметра: получатель и сообщение
-    if (params.size() < 3) 
-    {
-        sendToClient(fd, ":server 461 * PRIVMSG :Not enough parameters");
-        return;
-    }
-
-    std::string target = params[1]; // #channel или ник пользователя
-    std::string message;
-
-    // Собираем всё остальное как текст сообщения
-    message = params[2];
-    for (size_t i = 3; i < params.size(); i++)
-        message += " " + params[i];
-
-    // Убираем ведущий ':', если есть
-    if (!message.empty() && message[0] == ':')
-        message = message.substr(1);
-
-    // 3. Если target начинается с '#', это канал
-    if (target[0] == '#') 
-    {
-        std::map<std::string, Channel>::iterator it = _channels.find(target);
-        if (it == _channels.end()) 
-        {
-            sendToClient(fd, ":server 403 " + target + " :No such channel");
-            return;
-        }
-
-        Channel& channel = it->second;
-        if (!channel.hasClient(fd)) 
-        {
-            sendToClient(fd, ":server 442 " + target + " :You're not on that channel");
-            return;
-        }
-
-        // Отправляем ВСЕМ клиентам канала
-        std::string fullMsg = sender->getNickname() + " PRIVMSG " + target + " :" + message;
-        const std::set<int>& members = channel.getClients();
-        for (std::set<int>::const_iterator it2 = members.begin(); it2 != members.end(); ++it2)
-            sendToClient(*it2, fullMsg);
-    } 
-    else 
-    {
-        // 4. Если target — ник пользователя
-        bool found = false;
-        for (std::map<int, Client*>::iterator it = _clients.begin(); it != _clients.end(); ++it) 
-        {
-            if (it->second->getNickname() == target) 
             {
                 std::string fullMsg = sender->getPrefix() + " PRIVMSG " + target + " :" + message;
                 sendToClient(it->first, fullMsg);
@@ -750,16 +638,17 @@ void Server::cmdPrivmsg(int fd, const std::vector<std::string>& params)
                 break;
             }
         }
-        if (!found) 
+
+        if (!found)
             sendToClient(fd, ":server 401 " + target + " :No such nick");
     }
-}*/
+}
 
 void Server::cmdPart(int fd, const std::vector<std::string>& params) 
 {
     if (params.size() < 2)
     {
-        sendToClient(fd, ":server 461 PART :Not enough parameters\r\n");
+        sendToClient(fd, ":server 461 PART :Not enough parameters");
         return;
     }
     std::string channelName = params[1];
@@ -768,7 +657,7 @@ void Server::cmdPart(int fd, const std::vector<std::string>& params)
     std::map<std::string, Channel>::iterator it = _channels.find(channelName);
     if (it == _channels.end()) 
     {
-        sendToClient(fd, ":server 403 " + channelName + " :No such channel\r\n");
+        sendToClient(fd, ":server 403 " + channelName + " :No such channel");
         return;
     }
 
@@ -777,14 +666,14 @@ void Server::cmdPart(int fd, const std::vector<std::string>& params)
     // клиент в канале?
     if (!channel.hasClient(fd)) 
     {
-        sendToClient(fd, ":server 442 " + channelName + " :You're not on that channel\r\n");
+        sendToClient(fd, ":server 442 " + channelName + " :You're not on that channel");
         return;
     }
 
     Client& client = *(_clients[fd]);
 
     // формируем сообщение
-    std::string partMsg = client.getPrefix() + " PART " + channelName + "\r\n";
+    std::string partMsg = client.getPrefix() + " PART " + channelName;
 
     // рассылаем всем участникам канала
     const std::set<int>& members = channel.getClients();
@@ -806,7 +695,7 @@ void Server::cmdMode(int fd, const std::vector<std::string>& params)
     // MODE без target вообще нельзя
     if (params.size() < 2)
     {
-        sendToClient(fd, ":server 461 MODE :Not enough parameters\r\n");
+        sendToClient(fd, ":server 461 MODE :Not enough parameters");
         return;
     }
 
@@ -815,14 +704,14 @@ void Server::cmdMode(int fd, const std::vector<std::string>& params)
     // В вашем проекте пока работаем только с channel modes
     if (channelName.empty() || channelName[0] != '#')
     {
-        sendToClient(fd, ":server 403 " + channelName + " :No such channel\r\n");
+        sendToClient(fd, ":server 403 " + channelName + " :No such channel");
         return;
     }
 
     std::map<std::string, Channel>::iterator it = _channels.find(channelName);
     if (it == _channels.end())
     {
-        sendToClient(fd, ":server 403 " + channelName + " :No such channel\r\n");
+        sendToClient(fd, ":server 403 " + channelName + " :No such channel");
         return;
     }
 
@@ -863,7 +752,6 @@ void Server::cmdMode(int fd, const std::vector<std::string>& params)
             modeReply += " " + ss.str();
         }
 
-        modeReply += "\r\n";
         sendToClient(fd, modeReply);
         return;
     }
@@ -873,7 +761,7 @@ void Server::cmdMode(int fd, const std::vector<std::string>& params)
     // -------------------------------------------------
     if (!channel.isOperator(fd))
     {
-        sendToClient(fd, ":server 482 " + channelName + " :You're not a channel operator\r\n");
+        sendToClient(fd, ":server 482 " + channelName + " :You're not a channel operator");
         return;
     }
 
@@ -917,7 +805,7 @@ void Server::cmdMode(int fd, const std::vector<std::string>& params)
                     {
                         if (paramIndex >= params.size())
                         {
-                            sendToClient(fd, ":server 461 MODE :Not enough parameters\r\n");
+                            sendToClient(fd, ":server 461 MODE :Not enough parameters");
                             return;
                         }
                         channel.setKey(params[paramIndex]);
@@ -937,7 +825,7 @@ void Server::cmdMode(int fd, const std::vector<std::string>& params)
                     {
                         if (paramIndex >= params.size())
                         {
-                            sendToClient(fd, ":server 461 MODE :Not enough parameters\r\n");
+                            sendToClient(fd, ":server 461 MODE :Not enough parameters");
                             return;
                         }
 
@@ -960,7 +848,7 @@ void Server::cmdMode(int fd, const std::vector<std::string>& params)
                 case 'o':
                     if (paramIndex >= params.size())
                     {
-                        sendToClient(fd, ":server 461 MODE :Not enough parameters\r\n");
+                        sendToClient(fd, ":server 461 MODE :Not enough parameters");
                         return;
                     }
 
@@ -980,7 +868,7 @@ void Server::cmdMode(int fd, const std::vector<std::string>& params)
 
                         if (targetFd == -1 || !channel.hasClient(targetFd))
                         {
-                            sendToClient(fd, ":server 441 " + nick + " " + channelName + " :They aren't on that channel\r\n");
+                            sendToClient(fd, ":server 441 " + nick + " " + channelName + " :They aren't on that channel");
                             return;
                         }
 
@@ -996,7 +884,7 @@ void Server::cmdMode(int fd, const std::vector<std::string>& params)
                     break;
 
                 default:
-                    sendToClient(fd, ":server 472 " + std::string(1, c) + " :is unknown mode char to me\r\n");
+                    sendToClient(fd, ":server 472 " + std::string(1, c) + " :is unknown mode char to me");
                     return;
             }
         }
@@ -1097,7 +985,7 @@ void Server::cmdKick(int fd, const std::vector<std::string>& params)
 {
     if (params.size() < 3)
     {
-        sendToClient(fd, ":server 461 KICK :Not enough parameters\r\n");
+        sendToClient(fd, ":server 461 KICK :Not enough parameters");
         return;
     }
 
@@ -1113,7 +1001,7 @@ void Server::cmdKick(int fd, const std::vector<std::string>& params)
     std::map<std::string, Channel>::iterator chIt = _channels.find(channelName);
     if (chIt == _channels.end())
     {
-        sendToClient(fd, ":server 403 " + channelName + " :No such channel\r\n");
+        sendToClient(fd, ":server 403 " + channelName + " :No such channel");
         return;
     }
 
@@ -1121,13 +1009,13 @@ void Server::cmdKick(int fd, const std::vector<std::string>& params)
 
     if (!channel.hasClient(fd))
     {
-        sendToClient(fd, ":server 442 " + channelName + " :You're not on that channel\r\n");
+        sendToClient(fd, ":server 442 " + channelName + " :You're not on that channel");
         return;
     }
 
     if (!channel.isOperator(fd))
     {
-        sendToClient(fd, ":server 482 " + channelName + " :You're not channel operator\r\n");
+        sendToClient(fd, ":server 482 " + channelName + " :You're not channel operator");
         return;
     }
 
@@ -1143,7 +1031,7 @@ void Server::cmdKick(int fd, const std::vector<std::string>& params)
 
     if (targetFd == -1 || !channel.hasClient(targetFd))
     {
-        sendToClient(fd, ":server 441 " + targetNick + " " + channelName + " :They aren't on that channel\r\n");
+        sendToClient(fd, ":server 441 " + targetNick + " " + channelName + " :They aren't on that channel");
         return;
     }
 
@@ -1159,7 +1047,7 @@ void Server::cmdKick(int fd, const std::vector<std::string>& params)
     }
 
     std::string kickMsg = sender.getPrefix() + " KICK " + channelName + " " +
-                          targetNick + " :" + reason + "\r\n";
+                          targetNick + " :" + reason;
 
     const std::set<int>& members = channel.getClients();
     for (std::set<int>::const_iterator it = members.begin(); it != members.end(); ++it)
@@ -1167,77 +1055,6 @@ void Server::cmdKick(int fd, const std::vector<std::string>& params)
 
     channel.removeClient(targetFd);
 }
-
-/*void Server::cmdKick(int fd, const std::vector<std::string>& params)
-{
-    if (params.size() < 3)
-    {
-        sendToClient(fd, ":server 461 KICK :Not enough parameters");
-        return;
-    }
-
-    std::string channelName = params[1];
-    std::string nick = params[2];
-
-    if (_channels.find(channelName) == _channels.end())
-    {
-        sendToClient(fd, ":server 403 " + channelName + " :No such channel");
-        return;
-    }
-
-    std::map<std::string, Channel>::iterator it = _channels.find(channelName);
-
-    if (it == _channels.end())
-    {
-        sendToClient(fd, ":server 403 " + channelName + " :No such channel");
-        return;
-    }
-
-    Channel& channel = it->second;
-
-
-    if (!channel.hasClient(fd))
-    {
-        sendToClient(fd, ":server 442 " + channelName + " :You're not on that channel");
-        return;
-    }
-
-    if (!channel.isOperator(fd))
-    {
-        sendToClient(fd, ":server 482 " + channelName + " :You're not channel operator");
-        return;
-    }
-
-    // 🔎 Ищем пользователя вручную
-    int targetFd = -1;
-    for (std::map<int, Client*>::iterator it = _clients.begin();
-         it != _clients.end(); ++it)
-    {
-        if (it->second->getNickname() == nick)
-        {
-            targetFd = it->first;
-            break;
-        }
-    }
-
-    if (targetFd == -1 || !channel.hasClient(targetFd))
-    {
-        sendToClient(fd, ":server 441 " + nick + " " + channelName + " :They aren't on that channel");
-        return;
-    }
-
-    std::string kickMsg =
-        ":" + _clients[fd]->getNickname() +
-        " KICK " + channelName + " " + nick;
-
-    // отправляем всем
-    const std::set<int>& members = channel.getClients();
-    for (std::set<int>::const_iterator it = members.begin();
-         it != members.end(); ++it)
-        sendToClient(*it, kickMsg);
-
-    channel.removeClient(targetFd);
-}*/
 
 void Server::cmdTopic(int fd, const std::vector<std::string>& params) {
     if (params.size() < 2) {
@@ -1302,3 +1119,65 @@ void Server::cmdTopic(int fd, const std::vector<std::string>& params) {
               << channelName << " to: " << topic << std::endl;
 }
 
+void Server::cmdNotice(int fd, const std::vector<std::string>& params)
+{
+    std::map<int, Client*>::iterator clientIt = _clients.find(fd);
+    if (clientIt == _clients.end() || clientIt->second == NULL)
+        return;
+
+    Client* sender = clientIt->second;
+
+    // NOTICE не отправляет ошибок, просто игнорируем
+    if (!sender->isRegistered())
+        return;
+
+    if (params.size() < 3)
+        return;
+
+    std::string target = params[1];
+    std::string message = params[2];
+
+    for (size_t i = 3; i < params.size(); ++i)
+        message += " " + params[i];
+
+    if (!message.empty() && message[0] == ':')
+        message.erase(0, 1);
+
+    if (message.empty())
+        return;
+
+    // NOTICE в канал
+    if (!target.empty() && target[0] == '#')
+    {
+        std::map<std::string, Channel>::iterator chIt = _channels.find(target);
+        if (chIt == _channels.end())
+            return;
+
+        Channel& channel = chIt->second;
+
+        if (!channel.hasClient(fd))
+            return;
+
+        std::string fullMsg = sender->getPrefix() + " NOTICE " + target + " :" + message;
+
+        const std::set<int>& members = channel.getClients();
+        for (std::set<int>::const_iterator it = members.begin(); it != members.end(); ++it)
+        {
+            if (*it != fd)
+                sendToClient(*it, fullMsg);
+        }
+    }
+    else
+    {
+        // NOTICE пользователю
+        for (std::map<int, Client*>::iterator it = _clients.begin(); it != _clients.end(); ++it)
+        {
+            if (it->second && it->second->getNickname() == target)
+            {
+                std::string fullMsg = sender->getPrefix() + " NOTICE " + target + " :" + message;
+                sendToClient(it->first, fullMsg);
+                return;
+            }
+        }
+    }
+}
