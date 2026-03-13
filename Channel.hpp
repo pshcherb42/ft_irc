@@ -13,13 +13,17 @@ class Channel
         std::string _key;       // для +k
         unsigned int _limit;    // для +l
         bool _inviteOnly;       // +i
-        bool _topicRestricted;  // +t
+        bool _topicRestricted;  // +tes
         std::set<int> _invited;   // список приглашённых пользователей(после доавления удалить из списка для невхода повторно)
         std::string _topic;       // тема канала
 
     
     public:
         Channel(const std::string& name);
+        Channel();
+        Channel(const Channel&);
+        Channel& operator=(const Channel&);
+        ~Channel();
     
         const std::string& getName() const;
         const std::set<int>& getClients() const;

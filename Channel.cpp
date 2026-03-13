@@ -7,6 +7,20 @@ Channel::Channel(const std::string& name)
       _topicRestricted(false)
 {}
 
+Channel::Channel() : _name("") {}
+
+Channel::Channel(const Channel& other) {
+    *this = other;
+}
+
+Channel& Channel::operator=(const Channel& other) {
+    if (this != &other)
+        _name = other._name;
+    return *this;
+}
+
+Channel::~Channel() {}
+
 const std::string& Channel::getName() const { return (_name); }
 
 const std::set<int>& Channel::getClients() const { return (_clients); }

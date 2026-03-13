@@ -14,16 +14,15 @@ class Client; // Forward declaration — говорим, что класс Clien
 class Server 
 {
 private:
+    Server();
+    Server(const Server&);
+    Server& operator=(const Server&);
     int _port; // Порт, на котором слушает сервер
     std::string _password; // Пароль для подключения (PASS)
     int _serverSocket; // Сокет сервера
     std::vector<struct pollfd> _fds; // Вектор для poll() всех сокетов (сервер + клиенты)
     std::map<int, Client*> _clients; // Словарь: fd -> объект Client
     std::map<std::string, Channel> _channels;
-    //copy
-    //def
-    //=
-
 public:
     Server(int port, const std::string& password);
     ~Server();
@@ -53,6 +52,7 @@ private:
     // Utilities
     void sendToClient(int fd, const std::string& message); // Отправка сообщения клиенту
     std::vector<std::string> split(const std::string& str); // Разделение строки на слова по пробелу
+    bool isValidChannelName(const std::string& name); // check valid channel name
 };
 
 #endif

@@ -1,8 +1,10 @@
-# ft_irc
+*This project has been created as part of the 42 curriculum by akreise and pshcherb*
 
-Our own IRC server, we will use irssi client to connect 
+# Description
 
-# how to use
+ft_irc is a fully functional IRC server written in C++98, following the RFC 1459 specification guidelines. It allows multiple clients to connect simultaneously, register with a nickname and username, join channels, send messages, and be managed by channel operators. All of this is implemented without using threads or fork, running in a single process with non-blocking I/O using poll().
+
+# Instructions
 
 compile using make
 ./ircserv 6667 secret123
@@ -21,81 +23,49 @@ compile using make
 
 After try JOIN #testchannel
 
-try PRIVMSG #testchannel :Hello, everyne!
+try PRIVMSG #testchannel :Hello, everniyane!
+NOTICE #testchannel :Hello, everniyane!
 
 *with irssi - put in terminal irssi
 then /connect 127.0.0.1 6667 secret123
 
-уничтожить процесс - fuser -k 6669/tcp
+to kill the process - fuser -k 6669/tcp
 (to kill:  lsof -i :6667
 kill nomer)
-
-# what is done
-
-Socket setup with non-blocking I/O
-
-Poll loop handling multiple clients
-
-Command parsing(handling "\n") -- should be "\r\n" -- but for testing only works with "\n", we should remember to change it later
-
-Authentification (PASS,NICK,USER)
-
-JOIN - create/join channels
-
-PRIVMSG -  Send messages to channels/user
-
-Operator Commands(PART, MODE, KICK, INVITE, TOPIC)
-
-# possible next steps
-
-Лимит на количество каналов, в которых может быть клиент.
-Уведомления о JOIN / PART / KICK всем участникам канала.
-
-Подключить irssi
-
-проверить если неправильно ввел пароль при пасс то при повторном вводе выходит из программы
-после mode #channel smth выдает сообщение и делает доп пропуск строки
-
-Потом проерить что есть ридми файл для проверки
-Проверить что все классы сделаны по каноникал форм (если надо)
 
 # errors
 
 For the *"No such channel" message* — that's irssi trying to auto-join its saved channels. It's not your server printing that, it's irssi's UI showing the 403 error your server correctly returns. You can ignore this entirely.
 
-# changes 10 march
+# Resources
 
-change get fcntl a set fcntl inside setupSocket in server.cpp
-adde ping pong and cap and quit, who inside proccessComand in server.cpp
+Internet Relay Chat Protocol Documentation
+https://www.rfc-editor.org/rfc/rfc1459.html#section-1.1
 
+poll() - documentation page
+https://pubs.opengroup.org/onlinepubs/009696799/functions/poll.html
 
-Да, это **нормальное поведение `irssi`**: после `KICK` клиент может оставить окно канала открытым, даже если пользователя уже выгнали и он больше не состоит в канале. `irssi` вообще любит отделять “окно интерфейса” от “членства в канале”. В его документации и обсуждениях видно, что окна каналов могут жить своей жизнью, а отдельные настройки управляют автозакрытием окон в похожих ситуациях; при этом FAQ отдельно обсуждает поведение после `KICK`, не предполагая, что окно обязано исчезнуть автоматически. ([Irssi::Help][1])
+Ejemplo: Utilización de señales con API de socket de bloqueo
+https://www.ibm.com/docs/es/i/7.5.0?topic=designs-example-using-signals-blocking-socket-apis
 
-То, что пользователь **не может больше писать в канал и ничего там делать**, как раз хороший признак: сервер, скорее всего, правильно удалил его из канала. Подозрительно было бы обратное: если после `KICK` окно осталось и клиент всё ещё мог бы слать сообщения как участник канала. ([Irssi::Help][1])
+IRC tutorial
+https://medium.com/@afatir.ahmedfatir/small-irc-server-ft-irc-42-network-7cee848de6f9
 
-Тут важно различать две вещи. После `KICK` сервер должен корректно разослать событие `KICK`, а `irssi` уже сам решает, как это показать в UI. Само наличие окна не доказывает баг сервера. Баг был бы, если:
+Modelo TCP/IP
+https://es.wikipedia.org/wiki/Modelo_TCP/IP
 
-* kicked-клиент всё ещё числится в `NAMES`,
-* может писать в канал,
-* или `irssi` не показывает, что его выгнали. ([irssi.org][2])
+Internet Relay Chat
+https://es.wikipedia.org/wiki/Internet_Relay_Chat
 
-Проверяй так:
+Choosing irc client
+https://libera.chat/guides/clients
 
-1. у выгнанного клиента сделай `/names #test`,
-2. попробуй написать сообщение в этом окне,
-3. посмотри rawlog и убедись, что пришёл нормальный `KICK`.
+FT_IRC : Channels and Command Management
+https://medium.com/@mohamedsarda/ft-irc-channels-and-command-management-ff1ff3758a0b
 
-Если после `KICK` он не в списке и писать не может, то с большой вероятностью всё ок, а окно просто осталось как вкладка. У `irssi` это не редкость, потому что древний терминальный софт считает, что закрывать окна за пользователя было бы слишком человечно. ([Carina][3])
+Claude.ai - to sructure the defense presentation.
 
+ChatGPT - to determine work division strategy. We made our own division work strategy and consulted chat if it was the most optimal, it drew out attention that it was not the most optimal and offered a better tast separation which we did.
 
-Если ты используешь irssi, список всех открытых окон можно посмотреть командой:
+ChatGPT - loop not entering debug. We had a problem with \r\n inside commands parsing. The thing is that initialy we were anaware that irssi needed \r separator to consider commands full and we could find the problem. Finally we asked chat and he pointed to this issue. 
 
-/window list
-
-Как переключаться между окнами
-
-Самый быстрый способ:
-
-Alt + 1
-Alt + 2
-Alt + 3

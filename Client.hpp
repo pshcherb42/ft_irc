@@ -6,6 +6,9 @@
 
 class Client {
 private:
+    Client();
+    Client(const Client&);
+    Client& operator=(const Client&);
     int _fd;                  //файловый дескриптор сокета
     std::string _nickname;    //данные аутентификации
     std::string _username;    
